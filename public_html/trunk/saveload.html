@@ -1,0 +1,192 @@
+<html>
+<head>
+    <style>
+        html, body {
+            overflow: hidden;
+            width: 100%;
+            margin: 0px;
+            padding: 0px;
+        }
+        #blocker {
+            position: absolute;
+            top: 0px;
+            left: 0px;
+            right: 0px;
+            bottom: 0px;
+            background: rgba(0,0,0,0.5);
+            cursor: pointer;
+            color: #fff;
+            font-size: 16pt;
+            font-weight: bold;            
+            text-align: center;
+            padding-top: 300px;
+        }
+        #coords {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+        #state {
+            position: absolute;
+            top: 30px;
+            right: 10px;
+        }
+        #locations {
+            position: absolute;
+            top: 50px;
+            right: 10px;
+        }
+    </style>
+    <link type="text/css" href="js/jquery/jquery-ui.min.css">
+    <script src="js/w6_config.js"></script>
+    <script src="js/w6_db.js"></script>
+    <script src="js/w6_tools.js"></script>
+    <script src="js/w6_controls.js"></script>
+    <script src="js/w6_object.js"></script>
+    <script src="js/w6_world.js"></script>    
+    <script src="js/w6_gui.js"></script>
+
+    <script src="js/ImprovedNoise.js"></script>
+    <script src="js/jquery/jquery-1.10.2.js"></script>
+    <script src="js/jquery/jquery-ui.min.js"></script>
+
+    <script src="js/three/three_64.js"></script>
+    <script src="js/three/stats.min.js"></script>
+</head>
+<body>
+
+    <div id="container"></div>
+    <div id="blocker">CLICK TO CONTINUE</div>
+
+<script>
+    var container = document.getElementById('container');
+    var blocker = document.getElementById('blocker');
+
+    var scene, camera, render, stats;
+    var Material = {}, Geometry = {}, Location = { count: 0 };
+    var controls, selector;
+    var matrix = new THREE.Matrix4();
+    var time = Date.now();
+
+    var halfQuad = Math.round( Quad / 2 );
+    var halfGQ  = GQ/2;
+
+    var db = new W6Db();
+    var w_ = new W6World();
+    var gui = new W6Gui();
+
+
+    var init = function(){
+
+        // camera
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, cfg.eyeHeight, 0);
+        //scene.add( camera );
+
+        // create scene
+        scene = new THREE.Scene();
+        scene.fog = new THREE.Fog( 0xffffff, 0, 300 );
+
+        // point locker controls
+        if (cfg.controls == CTRL_EYES) {
+            controls = new W6Control( camera );
+            scene.add( controls.getObject() );
+        }
+
+        // central lines
+        if (cfg.debug){
+            var cLineGeom = new THREE.Geometry();
+            cLineGeom.vertices.push(new THREE.Vector3(0,-cfg.worldWidth,0));
+            cLineGeom.vertices.push(new THREE.Vector3(0,(cfg.worldWidth*GQ*2),0));
+            cLine = new THREE.Line(
+                    cLineGeom,
+                    new THREE.LineBasicMaterial({ color: 0x000ff}) // blue
+            );
+            scene.add(cLine);
+
+            var dLineGeom = new THREE.Geometry();
+            dLineGeom.vertices.push(new THREE.Vector3(halfQuad*GQ,-cfg.worldWidth,halfQuad*GQ));
+            dLineGeom.vertices.push(new THREE.Vector3(halfQuad*GQ,(cfg.worldWidth*GQ*2),halfQuad*GQ));
+            dLine = new THREE.Line(
+                    dLineGeom,
+                    new THREE.LineBasicMaterial({ color: 0xff0000}) // red
+            );
+            scene.add(dLine);
+        }
+
+        // geometry
+        Geometry.ground = new THREE.PlaneGeometry( Quad*GQ, Quad*GQ, Quad, Quad);
+        Geometry.ground.applyMatrix( matrix.makeRotationX( -Math.PI / 2 ) );
+        Geometry.box = new THREE.CubeGeometry(GQ, 2*GQ, GQ);
+        Geometry.selector = new THREE.PlaneGeometry( GQ, GQ );
+        Geometry.selector.applyMatrix( matrix.makeRotationX( -Math.PI / 2 ) );
+
+        // material
+        Material.ground = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, side: THREE.DoubleSide, wireframe: true });
+        Material.box = new THREE.MeshBasicMaterial({ color: 0xcccccc });
+        Material.selector = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+
+        // mesh
+        var box = new THREE.Mesh(
+                Geometry.box,
+                Material.box
+        );
+        box.position.set(halfQuad*GQ+box.geometry.width/2, box.geometry.height/2, halfQuad*GQ+box.geometry.depth/2);
+        scene.add( box );
+
+        selector = new THREE.Mesh(
+                Geometry.selector,
+                Material.selector
+        );
+        scene.position.set( camera.position.x, 0, camera.position.z );
+        scene.add( selector );
+
+        // create light
+
+        // render
+        renderer = new THREE.WebGLRenderer({ antialias: cfg.antialias });
+        renderer.setClearColor( 0xf0ffff );
+        renderer.setSize( window.innerWidth, window.innerHeight );
+        container.appendChild( renderer.domElement );
+
+        // stats
+        stats = new Stats();
+        stats.domElement.style.position = 'absolute';
+        stats.domElement.style.top = '0px';
+        container.appendChild( stats.domElement )
+
+        // events
+        window.addEventListener( 'resize', onWindowResize, false );
+        window.addEventListener( 'mouseout', onMouseLost, false );
+        window.addEventListener( 'mouseover', onMouseCatch, false );
+
+        // timers
+        var locationUpdate = setInterval( function(){ w_.locationUpdate() }, 500);
+        var guiUpdate = setInterval( function(){ gui.update() }, 1000);        
+
+        // call update cycle
+        update();
+    }
+
+    var update = function() {
+        requestAnimationFrame( update );
+        if (!cfg.ready) return;
+        
+        controls.update( Date.now() - time );
+        renderer.render( scene, camera );
+        stats.update();
+        time = Date.now();
+    }
+
+    onWindowResize = function(){
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize( window.innerWidth, window.innerHeight );
+    }
+
+    init();
+
+</script>
+
+</body>
+</html>

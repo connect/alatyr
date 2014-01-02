@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl : W6 branch 005-03</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body {
+				color: #61443e;
+				font-family:Monospace;
+				font-size:13px;
+				text-align:center;
+
+				/* background-color: #bfd1e5; */
+				background-color: #ffffff;
+				margin: 0px;
+				overflow: hidden;
+			}
+
+			a {	color: #a06851;	}
+
+			#info {
+				position: absolute;
+				top: 0px; width: 100%;
+				padding: 5px;
+                                display: none;
+			}
+
+			#oldie {
+				background:rgb(100,0,0) !important;
+				color:#fff !important;
+				margin-top:10em !important;
+			}
+			#oldie a { color:#fff }
+
+		</style>
+	</head>
+	<body>
+
+		<div id="container"><br /><br /><br /><br /><br />Generating world...</div>
+		<div id="info">
+			<a href="http://threejs.org" target="_blank">three.js</a> - <a href="http://www.minecraft.net/" target="_blank">minecraft</a> demo [ambient occlusion]. featuring <a href="http://painterlypack.net/" target="_blank">painterly pack</a><br />(left click: forward, right click: backward)
+		</div>
+
+                <script src="js/w6_config.js"></script>
+                <script src="js/w6_controls.js"></script>
+                <script src="js/w6_tools.js"></script>
+
+                <script src="js/ImprovedNoise.js"></script>
+                <script src="js/textureAnimator.js"></script>
+
+                <script src="js/three/three_64.js"></script>
+                <script src="js/three/FirstPersonControls.js"></script>
+                <script src="js/three/Detector.js"></script>
+		<script src="js/three/stats.min.js"></script>
+                <script src="js/three/OrbitControls.js"></script>
+
+		<script>
+			if ( ! Detector.webgl ) {
+                            Detector.addGetWebGLMessage();
+                            document.getElementById( 'container' ).innerHTML = "";
+			}
+
+			var fogExp2 = true;
+			var container, stats;
+			var camera, controls, scene, renderer;
+                        var Textures = {}, Geometry = {}, Material = {}, Mesh = {};
+                        var mesh, mat;
+
+			var worldWidth = cfg.worldWidth, worldDepth = cfg.worldDepth,
+			worldHalfWidth = worldWidth / 2, worldHalfDepth = worldDepth / 2,
+			data = generateHeight( worldWidth, worldDepth );
+
+			var clock = new THREE.Clock();
+                        var delta;
+
+			function init() {
+
+				container = document.getElementById( 'container' );
+
+                                //
+                                // Camera
+                                //
+                                if (cfg.controls == CTRL_ORBIT) {
+                                    camera = new THREE.PerspectiveCamera( 50, window.innerWidth / window.innerHeight, 0.1, 200 * cfg.worldWidth );
+                                    camera.position.set(
+                                            worldHalfWidth* GQ,
+                                            ( getY(worldHalfWidth, worldHalfDepth) + 20 )* GQ,
+                                            worldHalfDepth* GQ
+                                    );
+                                } else if (cfg.controls == CTRL_EYES) {
+                                    camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 20000);
+                                    camera.position.set(
+                                            0,
+                                            ( getY(worldHalfWidth, worldHalfDepth) + 3 )* GQ,
+                                            0
+                                    );
+                                } else {
+                                    camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 20000 );
+                                    camera.position.y = getY( worldHalfWidth, worldHalfDepth ) * GQ + GQ;
+                                }
+
+				scene = new THREE.Scene();
+				//scene.fog = new THREE.FogExp2( 0xffffff, 0.00015 ); //0.00015
+
+                                ////////////////////////////////////////////////
+                                // TEXTURES
+                                //
+
+				//var texture = THREE.ImageUtils.loadTexture( 'img/atlas.png' );
+				//texture.magFilter = THREE.NearestFilter;
+				//texture.minFilter = THREE.LinearMipMapLinearFilter;
+
+                                Textures = {
+                                    grass       : THREE.ImageUtils.loadTexture( 'img/misa/grass_top.png' ),
+                                    leaf        : THREE.ImageUtils.loadTexture( 'img/32/leaf.gif' ),
+                                    tree        : THREE.ImageUtils.loadTexture( 'img/16/tree.jpg' ),
+                                    snow        : THREE.ImageUtils.loadTexture( 'img/32/snow.jpg' ),
+                                    sand        : THREE.ImageUtils.loadTexture( 'img/32/sand.jpg' ),
+                                    highgrass   : THREE.ImageUtils.loadTexture( 'img/faerlight/tallgrass.png' ),
+                                    water       : THREE.ImageUtils.loadTexture( 'img/32/water_still.png' ),
+                                    clay        : THREE.ImageUtils.loadTexture( 'img/minecraft/clay.png' ),
+                                    rock        : THREE.ImageUtils.loadTexture( 'img/seamless-texture-high-res.jpg' ),
+                                };
+
+                                Textures.leaf.wrapS = THREE.RepeatWrapping;
+                                Textures.leaf.wrapT = THREE.RepeatWrapping;
+                                Textures.leaf.repeat.set(2,2);
+                                //Textures.rock.wrapS = Textures.rock.wrapT = THREE.RepeatWrapping;
+                                //Textures.rock.repeat.set(2,2);
+
+                                waterAnimator = new TextureAnimator( Textures.water, 1, 51, 51, 100 ); // texture, #horiz, #vert, #total, duration.
+
+				////////////////////////////////////////////////
+                                // GEOMETRY
+                                //
+
+                                var light, shadow; // dummies
+                                // normal lighting
+				var nLight = new THREE.Color( 0xcccccc ); //fff
+                                var nShadow = new THREE.Color( 0x505050 ); // 505050
+                                // undewater lighting
+                                var uwLight = new THREE.Color( 0x0077aa ); //fff
+                                var uwShadow = new THREE.Color (0x101050);
+                                light = nLight;
+                                shadow = nShadow;
+
+				var matrix = new THREE.Matrix4();
+
+				var pxGeometry = new THREE.PlaneGeometry( GQ, GQ );
+				pxGeometry.faces[ 0 ].vertexColors.push( light, shadow, light );
+				pxGeometry.faces[ 1 ].vertexColors.push( shadow, shadow, light );
+				pxGeometry.faceVertexUvs[ 0 ][ 0 ][ 0 ].y = 0.5;
+				pxGeometry.faceVertexUvs[ 0 ][ 0 ][ 2 ].y = 0.5;
+				pxGeometry.faceVertexUvs[ 0 ][ 1 ][ 2 ].y = 0.5;
+				pxGeometry.applyMatrix( matrix.makeRotationY( Math.PI / 2 ) );
+				pxGeometry.applyMatrix( matrix.makeTranslation( (GQ/2), 0, 0 ) );
+
+				var nxGeometry = new THREE.PlaneGeometry( GQ, GQ );
+				nxGeometry.faces[ 0 ].vertexColors.push( light, shadow, light );
+				nxGeometry.faces[ 1 ].vertexColors.push( shadow, shadow, light );
+				nxGeometry.faceVertexUvs[ 0 ][ 0 ][ 0 ].y = 0.5;
+				nxGeometry.faceVertexUvs[ 0 ][ 0 ][ 2 ].y = 0.5;
+				nxGeometry.faceVertexUvs[ 0 ][ 1 ][ 2 ].y = 0.5;
+				nxGeometry.applyMatrix( matrix.makeRotationY( - Math.PI / 2 ) );
+				nxGeometry.applyMatrix( matrix.makeTranslation( - (GQ/2), 0, 0 ) ); //50
+
+				var pyGeometry = new THREE.PlaneGeometry( GQ, GQ );
+				pyGeometry.faces[ 0 ].vertexColors.push( light, light, light );
+				pyGeometry.faces[ 1 ].vertexColors.push( light, light, light );
+				pyGeometry.faceVertexUvs[ 0 ][ 0 ][ 1 ].y = 0.5;
+				pyGeometry.faceVertexUvs[ 0 ][ 1 ][ 0 ].y = 0.5;
+				pyGeometry.faceVertexUvs[ 0 ][ 1 ][ 1 ].y = 0.5;
+				pyGeometry.applyMatrix( matrix.makeRotationX( - Math.PI / 2 ) );
+				pyGeometry.applyMatrix( matrix.makeTranslation( 0, (GQ/2), 0 ) );
+
+				var py2Geometry = new THREE.PlaneGeometry( GQ, GQ );
+				py2Geometry.faces[ 0 ].vertexColors.push( light, light, light );
+				py2Geometry.faces[ 1 ].vertexColors.push( light, light, light );
+				py2Geometry.faceVertexUvs[ 0 ][ 0 ][ 1 ].y = 0.5;
+				py2Geometry.faceVertexUvs[ 0 ][ 1 ][ 0 ].y = 0.5;
+				py2Geometry.faceVertexUvs[ 0 ][ 1 ][ 1 ].y = 0.5;
+				py2Geometry.applyMatrix( matrix.makeRotationX( - Math.PI / 2 ) );
+				py2Geometry.applyMatrix( matrix.makeRotationY( Math.PI / 2 ) );
+				py2Geometry.applyMatrix( matrix.makeTranslation( 0, (GQ/2), 0 ) );
+
+				var pzGeometry = new THREE.PlaneGeometry( GQ, GQ );
+				pzGeometry.faces[ 0 ].vertexColors.push( light, shadow, light );
+				pzGeometry.faces[ 1 ].vertexColors.push( shadow, shadow, light );
+				pzGeometry.faceVertexUvs[ 0 ][ 0 ][ 0 ].y = 0.5;
+				pzGeometry.faceVertexUvs[ 0 ][ 0 ][ 2 ].y = 0.5;
+				pzGeometry.faceVertexUvs[ 0 ][ 1 ][ 2 ].y = 0.5;
+				pzGeometry.applyMatrix( matrix.makeTranslation( 0, 0, (GQ/2)) );
+
+				var nzGeometry = new THREE.PlaneGeometry( GQ, GQ );
+				nzGeometry.faces[ 0 ].vertexColors.push( light, shadow, light );
+				nzGeometry.faces[ 1 ].vertexColors.push( shadow, shadow, light );
+				nzGeometry.faceVertexUvs[ 0 ][ 0 ][ 0 ].y = 0.5;
+				nzGeometry.faceVertexUvs[ 0 ][ 0 ][ 2 ].y = 0.5;
+				nzGeometry.faceVertexUvs[ 0 ][ 1 ][ 2 ].y = 0.5;
+				nzGeometry.applyMatrix( matrix.makeRotationY( Math.PI ) );
+				nzGeometry.applyMatrix( matrix.makeTranslation( 0, 0, - (GQ/2)) );
+
+                                var wGeometry = new THREE.PlaneGeometry(GQ, GQ);
+                                wGeometry.applyMatrix( matrix.makeRotationX( - Math.PI / 2 ) );
+                                wGeometry.applyMatrix( matrix.makeTranslation( 0, (GQ/2), 0 ) );
+
+				var dummy = new THREE.Mesh();
+				var geom = [
+                                    OBJ_GRASS,
+                                    OBJ_WATER,
+                                    OBJ_CLAY,
+                                    OBJ_SAND,
+                                    OBJ_SNOW,
+                                    OBJ_HIGHGRASS,
+                                    OBJ_TREE,
+                                    OBJ_ROCK
+                                ]
+
+                                for (c in geom){
+                                    Geometry[ geom[c] ] = new THREE.Geometry();
+                                }
+
+                                //
+                                // Generate Ground
+                                //
+				for ( var z = 0; z < worldDepth; z ++ ) {
+					for ( var x = 0; x < worldWidth; x ++ ) {
+
+						var h = getY( x, z );
+                                                if (h < cfg.waterHeight) {
+                                                    light = uwLight;
+                                                    shadow = uwShadow;
+                                                } else {
+                                                    light = nLight;
+                                                    shadow = nShadow;
+                                                }
+
+						dummy.position.x = x * GQ - worldHalfWidth * GQ;
+						dummy.position.y = h * GQ;
+						dummy.position.z = z * GQ - worldHalfDepth * GQ;
+
+						var px = getY( x + 1, z ); // >
+						var nx = getY( x - 1, z ); // <
+						var pz = getY( x, z + 1 ); // \/
+						var nz = getY( x, z - 1 ); // /\
+
+						var pxpz = getY( x + 1, z + 1 ); // \,
+						var nxpz = getY( x - 1, z + 1 ); // ,/
+						var pxnz = getY( x + 1, z - 1 ); // /`
+						var nxnz = getY( x - 1, z - 1 ); // `\;
+
+						var a = nx > h || nz > h || nxnz > h ? 0 : 1;
+						var b = nx > h || pz > h || nxpz > h ? 0 : 1;
+						var c = px > h || pz > h || pxpz > h ? 0 : 1;
+						var d = px > h || nz > h || pxnz > h ? 0 : 1;
+
+						// top texture
+                                                if ( a + c > b + d ) {
+							dummy.geometry = py2Geometry;
+
+							var colors = dummy.geometry.faces[ 0 ].vertexColors;
+							colors[ 0 ] = b === 0 ? shadow : light;
+							colors[ 1 ] = c === 0 ? shadow : light;
+							colors[ 2 ] = a === 0 ? shadow : light;
+
+							var colors = dummy.geometry.faces[ 1 ].vertexColors;
+							colors[ 0 ] = c === 0 ? shadow : light;
+							colors[ 1 ] = d === 0 ? shadow : light;
+							colors[ 2 ] = a === 0 ? shadow : light;
+
+						} else {
+							dummy.geometry = pyGeometry;
+
+							var colors = dummy.geometry.faces[ 0 ].vertexColors;
+							colors[ 0 ] = a === 0 ? shadow : light;
+							colors[ 1 ] = b === 0 ? shadow : light;
+							colors[ 2 ] = d === 0 ? shadow : light;
+
+							var colors = dummy.geometry.faces[ 1 ].vertexColors;
+							colors[ 0 ] = b === 0 ? shadow : light;
+							colors[ 1 ] = c === 0 ? shadow : light;
+							colors[ 2 ] = d === 0 ? shadow : light;
+						}
+
+                                                if (h >= cfg.snowHeight){
+                                                    THREE.GeometryUtils.merge( Geometry[OBJ_SNOW], dummy );
+                                                } else if (h == cfg.waterHeight){
+                                                    THREE.GeometryUtils.merge( Geometry[OBJ_SAND], dummy );
+                                                } else if (h < cfg.waterHeight) {
+                                                    THREE.GeometryUtils.merge( Geometry[OBJ_CLAY], dummy );
+                                                } else {
+                                                    THREE.GeometryUtils.merge( Geometry[OBJ_GRASS], dummy );
+                                                }
+
+						if ( ( px != h && px != h + 1 ) || x == 0 ) {
+							dummy.geometry = pxGeometry;
+
+							var colors = dummy.geometry.faces[ 0 ].vertexColors;
+							colors[ 0 ] = pxpz > px && x > 0 ? shadow : light;
+							colors[ 2 ] = pxnz > px && x > 0 ? shadow : light;
+
+							var colors = dummy.geometry.faces[ 1 ].vertexColors;
+							colors[ 2 ] = pxnz > px && x > 0 ? shadow : light;
+
+							THREE.GeometryUtils.merge( Geometry[OBJ_GRASS], dummy );
+						}
+
+						if ( ( nx != h && nx != h + 1 ) || x == worldWidth - 1 ) {
+							dummy.geometry = nxGeometry;
+
+							var colors = dummy.geometry.faces[ 0 ].vertexColors;
+							colors[ 0 ] = nxnz > nx && x < worldWidth - 1 ? shadow : light;
+							colors[ 2 ] = nxpz > nx && x < worldWidth - 1 ? shadow : light;
+
+							var colors = dummy.geometry.faces[ 1 ].vertexColors;
+							colors[ 2 ] = nxpz > nx && x < worldWidth - 1 ? shadow : light;
+
+							THREE.GeometryUtils.merge( Geometry[OBJ_GRASS], dummy );
+						}
+
+						if ( ( pz != h && pz != h + 1 ) || z == worldDepth - 1 ) {
+							dummy.geometry = pzGeometry;
+
+							var colors = dummy.geometry.faces[ 0 ].vertexColors;
+							colors[ 0 ] = nxpz > pz && z < worldDepth - 1 ? shadow : light;
+							colors[ 2 ] = pxpz > pz && z < worldDepth - 1 ? shadow : light;
+
+							var colors = dummy.geometry.faces[ 1 ].vertexColors;
+							colors[ 2 ] = pxpz > pz && z < worldDepth - 1 ? shadow : light;
+
+							THREE.GeometryUtils.merge( Geometry[OBJ_GRASS], dummy );
+						}
+
+						if ( ( nz != h && nz != h + 1 ) || z == 0 ) {
+							dummy.geometry = nzGeometry;
+
+							var colors = dummy.geometry.faces[ 0 ].vertexColors;
+							colors[ 0 ] = pxnz > nz && z > 0 ? shadow : light;
+							colors[ 2 ] = nxnz > nz && z > 0 ? shadow : light;
+
+							var colors = dummy.geometry.faces[ 1 ].vertexColors;
+							colors[ 2 ] = nxnz > nz && z > 0 ? shadow : light;
+
+							THREE.GeometryUtils.merge( Geometry[OBJ_GRASS], dummy );
+						}
+
+                                                // Water
+                                                //
+                                                if (h < cfg.waterHeight) {
+                                                    dummy.geometry = wGeometry;
+                                                    dummy.position.set(
+                                                        x*GQ - worldHalfWidth*GQ,
+                                                        cfg.waterHeight * GQ - (GQ/2),
+                                                        z*GQ - worldHalfDepth * GQ
+                                                    );
+                                                    THREE.GeometryUtils.merge( Geometry[OBJ_WATER], dummy );
+                                                }
+					}
+
+				}
+
+                                //
+                                // Generate Trees
+                                //
+                                if (cfg.trees) {
+                                    var geom = [
+                                        new THREE.CylinderGeometry(GQ/5,GQ/5,GQ/2,6,1, false),
+                                        new THREE.CylinderGeometry(0,GQ/1.5,GQ,6,3, false),
+                                        new THREE.CylinderGeometry(0,GQ/2,GQ,6,3, false),
+                                        new THREE.CylinderGeometry(0,GQ/3,GQ,6,3, false)
+                                    ];
+                                    for (c = 0; c < (cfg.worldWidth*5); c++) {
+                                        x = random(0,worldWidth-1);
+                                        z = random(0,worldDepth-1);
+                                        h = getY(x,z);
+
+                                        if (h > cfg.waterHeight) { // trees don't grow in water and sand
+
+                                            dummy.geometry = geom[0];
+                                            dummy.position.set( x*GQ - worldHalfWidth * GQ, h*GQ+(geom[0].height*1.5), z*GQ - worldHalfDepth * GQ);
+                                            THREE.GeometryUtils.merge( Geometry[OBJ_TREE], dummy );
+
+                                            dummy.geometry = geom[1];
+                                            dummy.position.set( x*GQ - worldHalfWidth * GQ, h*GQ+(geom[0].height*3), z*GQ - worldHalfDepth * GQ);
+                                            THREE.GeometryUtils.merge( Geometry[OBJ_TREE], dummy );
+
+                                            dummy.geometry = geom[2];
+                                            dummy.position.set( x*GQ - worldHalfWidth * GQ, h*GQ+(geom[0].height*4), z*GQ - worldHalfDepth * GQ);
+                                            THREE.GeometryUtils.merge( Geometry[OBJ_TREE], dummy );
+
+                                            dummy.geometry = geom[3];
+											//dummy.geometry.height = GQ + random(Math.round(-GQ/2),Math.round(GQ/2) );
+											//log(dummy.geometry.height);
+                                            dummy.position.set( x*GQ - worldHalfWidth * GQ, h*GQ+(geom[0].height*5), z*GQ - worldHalfDepth * GQ);
+                                            THREE.GeometryUtils.merge( Geometry[OBJ_TREE], dummy );
+                                        }
+                                    }
+                                }
+
+                                // Highgrass
+                                //
+                                if (cfg.grass)
+                                for (c = 0; c < (worldWidth*15); c++) {
+                                    x = random(0,worldWidth-1);
+                                    z = random(0,worldDepth-1);
+                                    h = getY(x,z);
+                                    if ( (h <= cfg.waterHeight) || (h >= cfg.snowHeight) ) continue;  // trees don't grow in water and sand
+
+                                    dummy.geometry = new THREE.PlaneGeometry( GQ, GQ );
+                                    dummy.applyMatrix( matrix.makeRotationY( random(0,2*Math.PI) ) ); // random rotation
+                                    dummy.position.set(
+                                            x * GQ - worldHalfWidth * GQ,
+                                            h * GQ + GQ,
+                                            z * GQ - worldHalfDepth * GQ
+                                    );
+                                    THREE.GeometryUtils.merge( Geometry[OBJ_HIGHGRASS], dummy );
+                                }
+
+                                // Rocks
+                                //
+                                if (cfg.rocks) 
+                                for (c = 0; c < worldWidth*2; c++) {
+                                    x = random(0,worldWidth-1);
+                                    z = random(0,worldDepth-1);
+                                    h = getY(x,z);
+                                    if ( (h < cfg.waterHeight) || (h >= cfg.snowHeight) ) continue;
+
+                                    dummy.geometry = new THREE.SphereGeometry(random(10,50), random(4,6), random(4,6) ) //THREE.PlaneGeometry( GQ, GQ );
+                                    dummy.applyMatrix( matrix.makeRotationY( random(0,2*Math.PI) ) ); // random rotation
+                                    dummy.applyMatrix( matrix.makeRotationZ( random(0,2*Math.PI) ) ); // random rotation
+                                    dummy.applyMatrix( matrix.makeRotationX( random(0,2*Math.PI) ) ); // random rotation
+                                    dummy.position.set(
+                                            x * GQ - worldHalfWidth * GQ,
+                                            h * GQ + (GQ/1.5),
+                                            z * GQ - worldHalfDepth * GQ
+                                    );
+                                    THREE.GeometryUtils.merge( Geometry[OBJ_ROCK], dummy );
+                                }
+
+                                ////////////////////////////////////////////////
+                                // MATERIALS
+                                //
+
+                                Material[OBJ_TREE]      = new THREE.MeshLambertMaterial({ map: Textures.leaf, vertexColors: THREE.VertexColors, ambient: 0x75bd70});
+                                /*
+                                [
+                                    new THREE.MeshLambertMaterial({ map: Textures.tree, vertexColors: THREE.VertexColors }),
+                                    new THREE.MeshLambertMaterial({ map: Textures.leaf, vertexColors: THREE.VertexColors, ambient: 0x75bd70 })
+                                ];*/
+
+                                Material[OBJ_WATER] = new THREE.MeshPhongMaterial({ map: Textures.water, transparent: true, opacity: 0.9, shiness: 100, vertexColors: THREE.VertexColors, ambient: 0x0077aa, side: THREE.DoubleSide });
+                                Material[OBJ_SAND]  = new THREE.MeshLambertMaterial({ map: Textures.sand, vertexColors: THREE.VertexColors, ambient: 0xaaaa66});
+                                Material[OBJ_SNOW]  = new THREE.MeshLambertMaterial({ map: Textures.snow, vertexColors: THREE.VertexColors, ambient: 0xaaaaaa});
+                                Material[OBJ_HIGHGRASS] = new THREE.MeshLambertMaterial({ map: Textures.highgrass, ambient: 0x75bd70, side: THREE.DoubleSide, transparent: true });
+                                Material[OBJ_GRASS] = new THREE.MeshLambertMaterial({ map: Textures.grass, ambient: 0x75bd70, color: 0x75bd70, vertexColors: THREE.VertexColors });
+                                Material[OBJ_CLAY]  = new THREE.MeshLambertMaterial({ map: Textures.clay, vertexColors: THREE.VertexColors});
+                                Material[OBJ_ROCK]  = new THREE.MeshLambertMaterial({ map: Textures.rock, vertexColors: THREE.VertexColors});
+
+
+                                ////////////////////////////////////////////////
+                                // MESHES
+                                //
+
+                                // Add geometries to scene
+                                //
+                                var tobj, toRender = [
+                                    OBJ_GRASS,
+                                    OBJ_WATER,
+                                    OBJ_CLAY,
+                                    OBJ_SAND,
+                                    OBJ_SNOW,
+                                    OBJ_HIGHGRASS,
+                                    OBJ_TREE,
+                                    OBJ_ROCK
+                                ];
+                                for (c in toRender) {
+                                    tobj = toRender[c];
+                                    Mesh[tobj] = new THREE.Mesh(
+                                        Geometry[tobj],
+                                        Material[tobj]
+                                    );
+                                    scene.add(Mesh[tobj]);
+                                }
+
+
+                                ////////////////////////////////////////////////
+                                // LIGHT
+                                //
+
+				var ambientLight = new THREE.AmbientLight( 0xcccccc );
+				scene.add( ambientLight );
+
+				var directionalLight = new THREE.DirectionalLight( 0xffffff, 1 );
+				directionalLight.position.set( 1, 1, 0.5 ).normalize();
+				scene.add( directionalLight );
+
+				renderer = new THREE.WebGLRenderer( { alpha: false } );
+				renderer.setClearColor( 0xf0ffff );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+                                //
+                                // Controls
+                                //
+                                if (cfg.controls == CTRL_ORBIT) {
+                                    controls = new THREE.OrbitControls( camera, renderer.domElement );
+                                    controls.target = new THREE.Vector3(worldHalfWidth, getY(worldHalfWidth,worldHalfDepth)*100, worldHalfDepth);
+                                    scene.add( controls );
+                                } else if (cfg.controls == CTRL_EYES) {
+                                    controls = new W6Control( camera );
+                                } else {
+                                    controls = new THREE.FirstPersonControls( camera );
+
+                                    controls.movementSpeed = 1000;
+                                    controls.lookSpeed = 0.125;
+                                    controls.lookVertical = true;
+                                    controls.constrainVertical = true;
+                                    controls.verticalMin = 0;//1.1;
+                                    controls.verticalMax = 2.2;
+                                }
+
+				container.innerHTML = "";
+				container.appendChild( renderer.domElement );
+
+                                //
+                                // STATS
+                                //
+
+				stats = new Stats();
+				stats.domElement.style.position = 'absolute';
+				stats.domElement.style.top = '0px';
+				container.appendChild( stats.domElement );
+
+				////////////////////////////////////////////////
+                                // EVENTS
+                                //
+
+				window.addEventListener( 'resize', onWindowResize, false );
+                                window.addEventListener( 'mouseout', onMouseLost, false );
+                                window.addEventListener( 'mouseover', onMouseCatch, false );
+			}
+
+			function onWindowResize() {
+                            camera.aspect = window.innerWidth / window.innerHeight;
+                            camera.updateProjectionMatrix();
+
+                            renderer.setSize( window.innerWidth, window.innerHeight );
+                            controls.handleResize();
+			}
+
+			function loadTexture( path, callback ) {
+                            var image = new Image();
+
+                            image.onload = function () { callback(); };
+                            image.src = path;
+
+                            return image;
+			}
+
+			function generateHeight( width, height ) {
+                            var data = [], perlin = new ImprovedNoise(),
+                            size = width * height, quality = cfg.worldVary, z = Math.random() * 100;
+
+                            for ( var j = 0; j < 4; j ++ ) {
+                                if ( j == 0 ) for ( var i = 0; i < size; i ++ ) data[ i ] = 0;
+
+                                for ( var i = 0; i < size; i ++ ) {
+                                        var x = i % width, y = ( i / width ) | 0;
+                                        data[ i ] += perlin.noise( x / quality, y / quality, z ) * quality;
+                                }
+
+                                quality *= 4
+                            }
+                            return data;
+			}
+
+			function getY( x, z ) {
+                            return ( data[ x + z * worldWidth ] * 0.2 ) | 0;
+			}
+
+			function animate() {
+                            requestAnimationFrame( animate );
+                            if (!cfg.ready) return;
+
+                            delta = clock.getDelta();
+
+                            // Water
+                            waterAnimator.update(1000 * delta);
+                            Mesh[OBJ_WATER].position.y = cfg.waterHeight * GQ + ( Math.sin(clock.getElapsedTime())*GQ/4 );
+
+                            render();
+                            stats.update();
+			}
+
+			function render() {
+
+                            if (cfg.controls == CTRL_FREECAM) {
+                                controls.update( delta );
+                            } else
+                                controls.update();
+
+                            renderer.render( scene, camera );
+			}
+
+                        init();
+			animate();
+		</script>
+	</body>
+</html>
